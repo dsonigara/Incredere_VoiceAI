@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../services/audio_service.dart';
 import '../services/websocket_service.dart';
+import '../services/cost_history_service.dart';
 
 class VoiceChatScreen extends StatefulWidget {
   final String voiceKey;
@@ -136,6 +137,13 @@ class _VoiceChatScreenState extends State<VoiceChatScreen>
       case 'stop_audio':
         _audioService.stopPlayback();
         setState(() => _isAiSpeaking = false);
+        break;
+
+      case 'session_summary':
+        if (msg.raw != null) {
+          final session = SessionCostData.fromServerMessage(msg.raw!);
+          CostHistoryService.addSession(session);
+        }
         break;
 
       case 'error':
@@ -406,6 +414,11 @@ class _VoiceChatScreenState extends State<VoiceChatScreen>
                   IconButton(
                     onPressed: () async {
                       await _stopRecording();
+                      // Request cost summary before disconnecting
+                      if (_wsService.isConnected) {
+                        _wsService.sendRequestSummary();
+                        await Future.delayed(const Duration(milliseconds: 500));
+                      }
                       await _wsService.disconnect();
                       setState(() {
                         _isConnected = false;

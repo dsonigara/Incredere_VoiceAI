@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'voice_chat_screen.dart';
 import 'voice_only_screen.dart';
+import 'cost_history_screen.dart';
 
 class VoiceOption {
   final String key;
@@ -135,7 +136,21 @@ class VoiceSelectScreen extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: Column(
             children: [
-              const SizedBox(height: 60),
+              const SizedBox(height: 16),
+              Align(
+                alignment: Alignment.centerRight,
+                child: IconButton(
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const CostHistoryScreen()),
+                  ),
+                  icon: const Icon(Icons.receipt_long_rounded),
+                  color: Colors.white.withValues(alpha: 0.5),
+                  tooltip: 'Cost History',
+                ),
+              ),
+              const SizedBox(height: 12),
               const Text(
                 'Incredere VoiceAI',
                 style: TextStyle(

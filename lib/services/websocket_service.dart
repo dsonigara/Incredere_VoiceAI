@@ -9,8 +9,9 @@ class ServerMessage {
   final String? text;
   final bool? isFinal;
   final String? message;
+  final Map<String, dynamic>? raw;
 
-  ServerMessage({required this.type, this.text, this.isFinal, this.message});
+  ServerMessage({required this.type, this.text, this.isFinal, this.message, this.raw});
 
   factory ServerMessage.fromJson(Map<String, dynamic> json) {
     return ServerMessage(
@@ -18,6 +19,7 @@ class ServerMessage {
       text: json['text'] as String?,
       isFinal: json['is_final'] as bool?,
       message: json['message'] as String?,
+      raw: json,
     );
   }
 }
@@ -95,6 +97,11 @@ class WebSocketService {
   /// Send text input (for testing without mic).
   void sendTextInput(String text) {
     sendMessage({'type': 'text_input', 'text': text});
+  }
+
+  /// Request session cost summary from server.
+  void sendRequestSummary() {
+    sendMessage({'type': 'request_summary'});
   }
 
   /// Disconnect from server.

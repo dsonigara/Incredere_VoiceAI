@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../services/audio_service.dart';
 import '../services/websocket_service.dart';
+import '../services/cost_history_service.dart';
 
 class VoiceOnlyScreen extends StatefulWidget {
   final String voiceKey;
@@ -140,6 +141,13 @@ class _VoiceOnlyScreenState extends State<VoiceOnlyScreen>
         });
         break;
 
+      case 'session_summary':
+        if (msg.raw != null) {
+          final session = SessionCostData.fromServerMessage(msg.raw!);
+          CostHistoryService.addSession(session);
+        }
+        break;
+
       case 'error':
         setState(() {
           _isAiThinking = false;
@@ -188,6 +196,12 @@ class _VoiceOnlyScreenState extends State<VoiceOnlyScreen>
   Future<void> _disconnect() async {
     await _stopRecording();
     await _audioService.stopPlayback();
+    // Request cost summary before disconnecting
+    if (_wsService.isConnected) {
+      _wsService.sendRequestSummary();
+      // Give server a moment to respond
+      await Future.delayed(const Duration(milliseconds: 500));
+    }
     await _wsService.disconnect();
     setState(() {
       _isConnected = false;

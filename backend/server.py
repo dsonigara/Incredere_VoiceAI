@@ -7,6 +7,7 @@ import asyncio
 import json
 import os
 import logging
+import time
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -56,6 +57,12 @@ CARTESIA_MODEL_ID = "sonic-2"
 
 DEEPGRAM_WS_URL = "wss://api.deepgram.com/v1/listen"
 
+# Pricing per unit
+PRICE_STT_PER_MIN = 0.0043       # Deepgram Nova-3
+PRICE_LLM_INPUT_PER_1M = 0.59    # Groq Llama 3.3 70B input
+PRICE_LLM_OUTPUT_PER_1M = 0.79   # Groq Llama 3.3 70B output
+PRICE_TTS_PER_1K_CHARS = 0.06    # Cartesia Sonic-2
+
 app = FastAPI(title="Incredere VoiceAI Server")
 
 app.add_middleware(
@@ -89,6 +96,15 @@ class VoiceSession:
         self.dg_ws = None
         self.transcript_buffer = ""
         self.silence_task = None
+
+        # Usage tracking
+        self.session_start = time.time()
+        self.stt_audio_bytes = 0
+        self.llm_input_tokens = 0
+        self.llm_output_tokens = 0
+        self.llm_calls = 0
+        self.tts_characters = 0
+
         logger.info(f"Voice selected: {self.voice['name']} ({self.voice['gender']})")
 
     async def _connect_deepgram(self):
@@ -145,6 +161,8 @@ class VoiceSession:
                     break
 
                 if "bytes" in data:
+                    # Track STT audio bytes
+                    self.stt_audio_bytes += len(data["bytes"])
                     # Forward audio to Deepgram, reconnect if needed
                     if self.dg_ws and self.dg_ws.state.name == "OPEN":
                         await self.dg_ws.send(data["bytes"])
@@ -164,6 +182,10 @@ class VoiceSession:
                         await self._handle_interrupt()
                     elif msg.get("type") == "text_input":
                         await self._process_user_input(msg["text"])
+                    elif msg.get("type") == "request_summary":
+                        summary = self._build_session_summary()
+                        await self.ws.send_json(summary)
+                        logger.info(f"Session cost: ${summary['total_cost']:.6f}")
 
         except WebSocketDisconnect:
             logger.info("Client disconnected")
@@ -311,11 +333,49 @@ class VoiceSession:
             temperature=0.7,
         )
 
+        # Track LLM token usage
+        if response.usage:
+            self.llm_input_tokens += response.usage.prompt_tokens or 0
+            self.llm_output_tokens += response.usage.completion_tokens or 0
+            self.llm_calls += 1
+
         return response.choices[0].message.content.strip()
+
+    def _build_session_summary(self) -> dict:
+        """Build cost summary for this session."""
+        duration_sec = time.time() - self.session_start
+        # STT: 16-bit mono 16kHz = 32000 bytes/sec
+        stt_duration_min = (self.stt_audio_bytes / 32000) / 60
+        stt_cost = stt_duration_min * PRICE_STT_PER_MIN
+
+        llm_input_cost = (self.llm_input_tokens / 1_000_000) * PRICE_LLM_INPUT_PER_1M
+        llm_output_cost = (self.llm_output_tokens / 1_000_000) * PRICE_LLM_OUTPUT_PER_1M
+        llm_cost = llm_input_cost + llm_output_cost
+
+        tts_cost = (self.tts_characters / 1000) * PRICE_TTS_PER_1K_CHARS
+
+        total_cost = stt_cost + llm_cost + tts_cost
+
+        return {
+            "type": "session_summary",
+            "session_duration_sec": round(duration_sec, 1),
+            "stt_duration_min": round(stt_duration_min, 3),
+            "stt_cost": round(stt_cost, 6),
+            "llm_input_tokens": self.llm_input_tokens,
+            "llm_output_tokens": self.llm_output_tokens,
+            "llm_calls": self.llm_calls,
+            "llm_cost": round(llm_cost, 6),
+            "tts_characters": self.tts_characters,
+            "tts_cost": round(tts_cost, 6),
+            "total_cost": round(total_cost, 6),
+            "voice": self.voice["name"],
+        }
 
     async def _speak(self, text: str):
         """Convert text to speech using Cartesia and stream audio to client."""
         self.is_speaking = True
+        # Track TTS characters
+        self.tts_characters += len(text)
 
         try:
             cartesia = AsyncCartesia(api_key=CARTESIA_API_KEY)
